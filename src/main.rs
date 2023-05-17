@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::env;
+use std::{env, io};
 use anyhow::anyhow;
 
 use chrono::{DateTime, LocalResult, TimeZone, Utc};
 use reqwest::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Error;
-use env_logger::Builder;
 use log::{debug, error, info, LevelFilter};
 
 use data::*;
@@ -15,9 +14,7 @@ mod data;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    Builder::new()
-        .filter_level(LevelFilter::Info)
-        .init();
+    init_logging()?;
     let token = env::var("TOKEN").ok();
     if token.is_some() {
         info!("Retrieved api-token")
@@ -132,4 +129,22 @@ fn create_default_headers(token: Option<String>) -> anyhow::Result<HeaderMap> {
         }
     }
     Ok(headers)
+}
+
+fn init_logging() -> anyhow::Result<()> {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} - {} - {}] {}",
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(LevelFilter::Info)
+        //.chain(io::stderr())
+        .chain(fern::log_file("logs/log.log")?)
+        .apply()?;
+    Ok(())
 }
