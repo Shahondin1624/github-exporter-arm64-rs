@@ -110,6 +110,36 @@ pub struct MinimalRepository {
 }
 
 #[derive(Debug, serde::Deserialize)]
+pub struct FullCommitData {
+    pub commit: Commit,
+    pub changes: CommitChangeDetails
+}
+
+impl FullCommitData {
+    pub fn from(commit: Commit, changes: CommitChangeDetails) -> FullCommitData {
+        FullCommitData {
+            commit,
+            changes,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RepositoryAndCommits {
+    pub repository: MinimalRepository,
+    pub commits: Vec<FullCommitData>,
+}
+
+impl RepositoryAndCommits {
+    pub fn from(repository: MinimalRepository, commits: Vec<FullCommitData>) -> RepositoryAndCommits {
+        RepositoryAndCommits {
+            repository,
+            commits,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
 pub struct Commit {
     pub url: String,
     pub sha: String,

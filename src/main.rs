@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::{env, io};
+use std::{env};
+use std::time::SystemTime;
 use anyhow::anyhow;
 
 use chrono::{DateTime, LocalResult, TimeZone, Utc};
@@ -7,6 +8,7 @@ use reqwest::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Error;
 use log::{debug, error, info, LevelFilter};
+use prometheus_client::registry::Registry;
 
 use data::*;
 
@@ -15,35 +17,53 @@ mod data;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_logging()?;
-    let token = env::var("TOKEN").ok();
-    if token.is_some() {
-        info!("Retrieved api-token")
-    } else {
-        info!("Failed to retrieve api-token")
-    }
+    let token = env::var("TOKEN").expect("No github-token provided for environment variable 'TOKEN'!");
+    let organization = env::var("ORG").expect("No organization provided for environment variable 'ORG'!");
+    let mut registry = <Registry>::default();
     let client = Client::new();
 
     let headers = create_default_headers(token)?;
 
-    let repositories = list_organization_repositories(&client, headers.clone(), "KlaraOppenheimerSchule").await?;
 
-    let date_time = Utc.with_ymd_and_hms(2015, 11, 28, 21, 0, 9);
-    let date_time = match date_time {
+    let last = Utc.with_ymd_and_hms(2015, 11, 28, 21, 0, 9);
+    let mut last = match last {
         LocalResult::None => { panic!("No timestamp") }
         LocalResult::Single(dt) => { dt }
         LocalResult::Ambiguous(_, _) => { panic!("Ambiguous timestamp") }
     };
 
-    for repository in repositories {
-        println!("{}", repository.name);
-        let commits = list_commits_in_repository_since(&client, repository.full_name.clone(), headers.clone(), date_time).await?;
-        for commit in commits {
-            let details = fetch_commit(&client, headers.clone(), &repository.full_name.clone(), commit.sha.as_str()).await?;
-            println!("{:?}", details);
-        }
-    }
-
+    let (data, last) = get_all_commits_since_last_and_update_timestamp(&client, &headers, organization.as_str(), last).await?;
+    println!("Finished fetching data");
     Ok(())
+}
+
+async fn get_all_commits_since_last_and_update_timestamp(client: &Client, headers: &HeaderMap, organization: &str, since: DateTime<Utc>) -> anyhow::Result<(Vec<RepositoryAndCommits>, DateTime<Utc>)> {
+    let now: DateTime<Utc> = DateTime::from(SystemTime::now());
+    let data = get_all_commits_since(client, headers, organization, since.into()).await?;
+    Ok((data, now))
+}
+
+async fn get_all_commits_since(client: &Client, headers: &HeaderMap, organization: &str, since: DateTime<Utc>) -> anyhow::Result<Vec<RepositoryAndCommits>> {
+    let repositories = list_organization_repositories(&client, headers.clone(), organization).await?;
+    let mut data = Vec::new();
+    for repository in repositories {
+        debug!("Fetching commits for {repo}...", repo=&repository.name);
+        let commits = list_commits_in_repository_since(&client, repository.full_name.clone(), headers.clone(), since).await?;
+        let mut full_data = Vec::new();
+        for commit in commits {
+            debug!("Fetching details for {commit}...", commit=&commit.commit.message);
+            let full_commit_data = get_full_commit_data(&client, headers.clone(), &repository.full_name.clone(), commit).await?;
+            full_data.push(full_commit_data);
+        }
+        let repository_and_commits = RepositoryAndCommits::from(repository, full_data);
+        data.push(repository_and_commits);
+    }
+    Ok(data)
+}
+
+async fn get_full_commit_data(client: &Client, headers: HeaderMap, full_repository_name: &str, commit: Commit) -> anyhow::Result<FullCommitData> {
+    let details = fetch_commit(&client, headers.clone(), full_repository_name, commit.sha.as_str()).await?;
+    Ok(FullCommitData::from(commit, details))
 }
 
 async fn list_organization_repositories(client: &Client, headers: HeaderMap, organization: &str) -> anyhow::Result<Vec<MinimalRepository>> {
@@ -118,16 +138,11 @@ fn handle_json_conversion<Type>(status_code: u16, json_string: String, conversio
     }
 }
 
-fn create_default_headers(token: Option<String>) -> anyhow::Result<HeaderMap> {
+fn create_default_headers(token: String) -> anyhow::Result<HeaderMap> {
     let mut headers = HeaderMap::new();
     headers.insert("Accept", HeaderValue::from_static("application/vnd.github+json"));
     headers.insert("User-Agent", HeaderValue::from_static("github-exporter-arm64-rs"));
-    match token {
-        None => {}
-        Some(value) => {
-            headers.insert("Authorization", HeaderValue::from_str(format!("Bearer {token}", token = value).as_str())?);
-        }
-    }
+    headers.insert("Authorization", HeaderValue::from_str(format!("Bearer {token}").as_str())?);
     Ok(headers)
 }
 
@@ -142,7 +157,7 @@ fn init_logging() -> anyhow::Result<()> {
                 message
             ))
         })
-        .level(LevelFilter::Info)
+        .level(LevelFilter::Debug)
         //.chain(io::stderr())
         .chain(fern::log_file("logs/log.log")?)
         .apply()?;
