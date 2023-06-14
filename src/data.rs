@@ -1,6 +1,7 @@
+use std::hash::{Hash, Hasher};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct SimpleUser {
     pub name: Option<String>,
     pub email: Option<String>,
@@ -26,7 +27,7 @@ pub struct SimpleUser {
     pub starred_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct MinimalRepository {
     pub id: i32,
     pub node_id: String,
@@ -109,10 +110,99 @@ pub struct MinimalRepository {
     pub network_count: Option<i32>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+impl Hash for MinimalRepository {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.node_id.hash(state);
+        self.name.hash(state);
+        self.full_name.hash(state);
+        self.owner.hash(state);
+        self.private.hash(state);
+        self.html_url.hash(state);
+        self.description.hash(state);
+        self.fork.hash(state);
+        self.url.hash(state);
+        self.archive_url.hash(state);
+        self.assignees_url.hash(state);
+        self.blobs_url.hash(state);
+        self.branches_url.hash(state);
+        self.collaborators_url.hash(state);
+        self.comments_url.hash(state);
+        self.commits_url.hash(state);
+        self.compare_url.hash(state);
+        self.contents_url.hash(state);
+        self.contributors_url.hash(state);
+        self.deployments_url.hash(state);
+        self.downloads_url.hash(state);
+        self.events_url.hash(state);
+        self.forks_url.hash(state);
+        self.git_commits_url.hash(state);
+        self.git_refs_url.hash(state);
+        self.git_tags_url.hash(state);
+        self.git_url.hash(state);
+        self.issue_comment_url.hash(state);
+        self.issue_events_url.hash(state);
+        self.issues_url.hash(state);
+        self.keys_url.hash(state);
+        self.labels_url.hash(state);
+        self.languages_url.hash(state);
+        self.merges_url.hash(state);
+        self.milestones_url.hash(state);
+        self.notifications_url.hash(state);
+        self.pulls_url.hash(state);
+        self.pulls_url.hash(state);
+        self.releases_url.hash(state);
+        self.ssh_url.hash(state);
+        self.stargazers_url.hash(state);
+        self.statuses_url.hash(state);
+        self.subscribers_url.hash(state);
+        self.subscription_url.hash(state);
+        self.tags_url.hash(state);
+        self.teams_url.hash(state);
+        self.trees_url.hash(state);
+        self.clone_url.hash(state);
+        self.mirror_url.hash(state);
+        self.hooks_url.hash(state);
+        self.svn_url.hash(state);
+        self.homepage.hash(state);
+        self.language.hash(state);
+        self.forks_count.hash(state);
+        self.stargazers_count.hash(state);
+        self.watchers_count.hash(state);
+        self.size.hash(state);
+        self.default_branch.hash(state);
+        self.open_issues_count.hash(state);
+        self.is_template.hash(state);
+        self.topics.hash(state);
+        self.has_issues.hash(state);
+        self.has_projects.hash(state);
+        self.has_wiki.hash(state);
+        self.has_pages.hash(state);
+        self.has_downloads.hash(state);
+        self.has_discussions.hash(state);
+        self.archived.hash(state);
+        self.disabled.hash(state);
+        self.visibility.hash(state);
+        self.pushed_at.hash(state);
+        self.created_at.hash(state);
+        self.updated_at.hash(state);
+        if let Some(permissions) = &self.permissions {
+            permissions.to_string().hash(state);
+        }
+        if let Some(template_repository) = &self.template_repository {
+            template_repository.to_string().hash(state);
+        }
+        self.temp_clone_token.hash(state);
+        self.delete_branch_on_merge.hash(state);
+        self.subscribers_count.hash(state);
+        self.network_count.hash(state);
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct FullCommitData {
     pub commit: Commit,
-    pub changes: CommitChangeDetails
+    pub changes: CommitChangeDetails,
 }
 
 impl FullCommitData {
@@ -124,7 +214,12 @@ impl FullCommitData {
     }
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
+pub struct RepositoriesWithCommits {
+    pub data: Vec<RepositoryAndCommits>,
+}
+
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct RepositoryAndCommits {
     pub repository: MinimalRepository,
     pub commits: Vec<FullCommitData>,
@@ -139,7 +234,7 @@ impl RepositoryAndCommits {
     }
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct Commit {
     pub url: String,
     pub sha: String,
@@ -152,7 +247,7 @@ pub struct Commit {
     pub parents: Vec<Parent>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct CommitDetails {
     pub url: String,
     pub author: Option<GitUser>,
@@ -163,20 +258,20 @@ pub struct CommitDetails {
     pub verification: Verification,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct GitUser {
     pub name: String,
     pub email: String,
     pub date: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct Tree {
     pub sha: String,
     pub url: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct Verification {
     pub verified: bool,
     pub reason: String,
@@ -184,27 +279,27 @@ pub struct Verification {
     pub signature: Option<String>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum UserType {
     User,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct Parent {
     pub sha: String,
     pub url: String,
     pub html_url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct CommitStats {
     pub additions: i32,
     pub deletions: i32,
     pub total: i32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct DiffEntry {
     pub sha: String,
     pub filename: String,
@@ -219,7 +314,7 @@ pub struct DiffEntry {
     pub previous_filename: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct CommitChangeDetails {
     pub stats: CommitStats,
     pub files: Vec<DiffEntry>,

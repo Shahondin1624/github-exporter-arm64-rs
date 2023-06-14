@@ -13,6 +13,7 @@ use prometheus_client::registry::Registry;
 use data::*;
 
 mod data;
+mod metrics;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,7 +25,6 @@ async fn main() -> anyhow::Result<()> {
 
     let headers = create_default_headers(token)?;
 
-
     let last = Utc.with_ymd_and_hms(2015, 11, 28, 21, 0, 9);
     let mut last = match last {
         LocalResult::None => { panic!("No timestamp") }
@@ -34,13 +34,20 @@ async fn main() -> anyhow::Result<()> {
 
     let (data, last) = get_all_commits_since_last_and_update_timestamp(&client, &headers, organization.as_str(), last).await?;
     println!("Finished fetching data");
+    println!("{:?}", data);
     Ok(())
 }
 
-async fn get_all_commits_since_last_and_update_timestamp(client: &Client, headers: &HeaderMap, organization: &str, since: DateTime<Utc>) -> anyhow::Result<(Vec<RepositoryAndCommits>, DateTime<Utc>)> {
-    let now: DateTime<Utc> = DateTime::from(SystemTime::now());
+fn now() -> DateTime<Utc> {
+    DateTime::from(SystemTime::now())
+}
+
+async fn get_all_commits_since_last_and_update_timestamp(client: &Client, headers: &HeaderMap, organization: &str, since: DateTime<Utc>) -> anyhow::Result<(RepositoriesWithCommits, DateTime<Utc>)> {
+    let now: DateTime<Utc> = now();
     let data = get_all_commits_since(client, headers, organization, since.into()).await?;
-    Ok((data, now))
+    Ok((RepositoriesWithCommits {
+        data
+    }, now))
 }
 
 async fn get_all_commits_since(client: &Client, headers: &HeaderMap, organization: &str, since: DateTime<Utc>) -> anyhow::Result<Vec<RepositoryAndCommits>> {
