@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::{env};
+use std::ops::DerefMut;
+use std::sync::{LockResult, Mutex};
 use std::time::SystemTime;
 use anyhow::anyhow;
+use cached::proc_macro::cached;
 
 use chrono::{DateTime, LocalResult, TimeZone, Utc};
 use reqwest::{Client, Response};
@@ -9,32 +12,37 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Error;
 use log::{debug, error, info, LevelFilter};
 use prometheus_client::registry::Registry;
+use lazy_static::lazy_static;
 
 use data::*;
+use crate::metrics::create_metrics;
 
 mod data;
 mod metrics;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    init_logging()?;
-    let token = env::var("TOKEN").expect("No github-token provided for environment variable 'TOKEN'!");
-    let organization = env::var("ORG").expect("No organization provided for environment variable 'ORG'!");
-    let mut registry = <Registry>::default();
-    let client = Client::new();
-
-    let headers = create_default_headers(token)?;
-
-    let last = Utc.with_ymd_and_hms(2015, 11, 28, 21, 0, 9);
-    let mut last = match last {
+lazy_static! {
+    static ref ORGANIZATION: String = env::var("ORG").expect("No organization provided for environment variable 'ORG'!");
+    static ref HEADERS: HeaderMap = create_default_headers(env::var("TOKEN").expect("No github-token provided for environment variable 'TOKEN'!")).expect("");
+    static ref LAST_SCRAPE: Mutex<DateTime<Utc>> = Mutex::new({
+        let last = Utc.with_ymd_and_hms(2007, 1, 1, 1, 1, 1);
+    let last = match last {
         LocalResult::None => { panic!("No timestamp") }
         LocalResult::Single(dt) => { dt }
         LocalResult::Ambiguous(_, _) => { panic!("Ambiguous timestamp") }
     };
+        last
+    });
+}
 
-    let (data, last) = get_all_commits_since_last_and_update_timestamp(&client, &headers, organization.as_str(), last).await?;
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    init_logging()?;
+    let mut registry = <Registry>::default();
+
+
+    let data = get_all_commits_since_last_and_update_timestamp().await;
     println!("Finished fetching data");
-    println!("{:?}", data);
+    create_metrics(&mut registry);
     Ok(())
 }
 
@@ -42,12 +50,28 @@ fn now() -> DateTime<Utc> {
     DateTime::from(SystemTime::now())
 }
 
-async fn get_all_commits_since_last_and_update_timestamp(client: &Client, headers: &HeaderMap, organization: &str, since: DateTime<Utc>) -> anyhow::Result<(RepositoriesWithCommits, DateTime<Utc>)> {
+#[cached]
+pub async fn get_all_commits_since_last_and_update_timestamp() -> Option<RepositoriesWithCommits> {
+    let client = Client::new();
     let now: DateTime<Utc> = now();
-    let data = get_all_commits_since(client, headers, organization, since.into()).await?;
-    Ok((RepositoriesWithCommits {
-        data
-    }, now))
+    let last_scrape = match LAST_SCRAPE.lock() {
+        Ok(guard) => { (*guard).into() }
+        Err(_) => {
+            error!("Failed to acquire mutex gard of last scrape!");
+            return None;
+        }
+    };
+    let result = get_all_commits_since(&client, &HEADERS, ORGANIZATION.as_str(), last_scrape).await;
+    let data = match result {
+        Ok(value) => { Some(RepositoriesWithCommits { data: value }) }
+        Err(error) => {
+            error!("Some error occurred during fetching of data from github {error}");
+            None
+        }
+    };
+    let mut last_scrape_ref = LAST_SCRAPE.lock().unwrap();
+    *last_scrape_ref.deref_mut() = now;
+    data
 }
 
 async fn get_all_commits_since(client: &Client, headers: &HeaderMap, organization: &str, since: DateTime<Utc>) -> anyhow::Result<Vec<RepositoryAndCommits>> {
