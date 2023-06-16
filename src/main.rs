@@ -1,18 +1,27 @@
 use std::collections::HashMap;
-use std::{env};
+use std::{env, io};
+use std::future::Future;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::ops::DerefMut;
-use std::sync::{LockResult, Mutex};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use anyhow::anyhow;
-use cached::proc_macro::cached;
+use cached::proc_macro::once;
 
 use chrono::{DateTime, LocalResult, TimeZone, Utc};
-use reqwest::{Client, Response};
+use reqwest::{Client};
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Error;
-use log::{debug, error, info, LevelFilter};
+use log::{debug, error, LevelFilter};
 use prometheus_client::registry::Registry;
 use lazy_static::lazy_static;
+use prometheus_client::encoding::text::encode;
+use tokio::signal::unix::{signal, SignalKind};
+use hyper::{
+    service::{make_service_fn, service_fn},
+    Body, Request, Response, Server,
+};
 
 use data::*;
 use crate::metrics::create_metrics;
@@ -23,6 +32,7 @@ mod metrics;
 lazy_static! {
     static ref ORGANIZATION: String = env::var("ORG").expect("No organization provided for environment variable 'ORG'!");
     static ref HEADERS: HeaderMap = create_default_headers(env::var("TOKEN").expect("No github-token provided for environment variable 'TOKEN'!")).expect("");
+    static ref PORT: u16 = env::var("PORT").expect("No port provided for environment variable 'PORT'!").parse::<u16>().expect("Not parsable to u16");
     static ref LAST_SCRAPE: Mutex<DateTime<Utc>> = Mutex::new({
         let last = Utc.with_ymd_and_hms(2007, 1, 1, 1, 1, 1);
     let last = match last {
@@ -38,22 +48,67 @@ lazy_static! {
 async fn main() -> anyhow::Result<()> {
     init_logging()?;
     let mut registry = <Registry>::default();
-
-
-    let data = get_all_commits_since_last_and_update_timestamp().await;
-    println!("Finished fetching data");
     create_metrics(&mut registry);
+    let metrics_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), *PORT);
+    start_metrics_server(metrics_addr, registry).await;
     Ok(())
+}
+
+/// Start a HTTP server to report metrics.
+pub async fn start_metrics_server(metrics_addr: SocketAddr, registry: Registry) {
+    let mut shutdown_stream = signal(SignalKind::terminate()).unwrap();
+
+    eprintln!("Starting metrics server on {metrics_addr}");
+
+    let registry = Arc::new(registry);
+    Server::bind(&metrics_addr)
+        .serve(make_service_fn(move |_conn| {
+            let registry = registry.clone();
+            async move {
+                let handler = make_handler(registry);
+                Ok::<_, io::Error>(service_fn(handler))
+            }
+        }))
+        .with_graceful_shutdown(async move {
+            shutdown_stream.recv().await;
+        })
+        .await
+        .unwrap();
+}
+
+/// This function returns a HTTP handler (i.e. another function)
+pub fn make_handler(
+    registry: Arc<Registry>,
+) -> impl Fn(Request<Body>) -> Pin<Box<dyn Future<Output = io::Result<Response<Body>>> + Send>> {
+    // This closure accepts a request and responds with the OpenMetrics encoding of our metrics.
+    move |_req: Request<Body>| {
+        let reg = registry.clone();
+        Box::pin(async move {
+            let mut buf = String::new();
+            encode(&mut buf, &reg.clone())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                .map(|_| {
+                    let body = Body::from(buf);
+                    Response::builder()
+                        .header(
+                            hyper::header::CONTENT_TYPE,
+                            "application/openmetrics-text; version=1.0.0; charset=utf-8",
+                        )
+                        .body(body)
+                        .unwrap()
+                })
+        })
+    }
 }
 
 fn now() -> DateTime<Utc> {
     DateTime::from(SystemTime::now())
 }
 
-#[cached]
+#[once(time = 10, option = true, sync_writes = true)]
 pub async fn get_all_commits_since_last_and_update_timestamp() -> Option<RepositoriesWithCommits> {
     let client = Client::new();
-    let now: DateTime<Utc> = now();
+    let now: DateTime<Utc> = DateTime::from(SystemTime::now()); //for whatever reason calling now() would result in a compiler error due to the used macro
     let last_scrape = match LAST_SCRAPE.lock() {
         Ok(guard) => { (*guard).into() }
         Err(_) => {
@@ -112,7 +167,7 @@ async fn list_organization_repositories(client: &Client, headers: HeaderMap, org
     Ok(repositories)
 }
 
-fn get_status_code(response: &Response) -> u16 {
+fn get_status_code(response: &reqwest::Response) -> u16 {
     let status_code = &response.status().clone();
     let status_code = status_code.as_u16();
     status_code

@@ -7,6 +7,7 @@ use prometheus_client::registry::Registry;
 use crate::data::{RepositoriesWithCommits};
 use crate::get_all_commits_since_last_and_update_timestamp;
 use futures::executor::block_on;
+use log::debug;
 
 pub fn extract_number_of_repositories(data: &RepositoriesWithCommits) -> i128 {
     data.data.len() as i128
@@ -64,7 +65,10 @@ pub fn extract_total_number_of_deletions(data: &RepositoriesWithCommits) -> i128
             .map(|commit| commit.changes.stats.deletions as i128).sum::<i128>()).sum()
 }
 
-pub fn create_metrics(registry: &mut Registry) {}
+pub fn create_metrics(registry: &mut Registry) {
+    debug!("Registration of Repository Count metric...");
+    registry.register("repositoryCount", "Current total number of repositories", RepositoryCountMetric {})
+}
 
 #[derive(Debug)]
 struct RepositoryCountMetric {}
